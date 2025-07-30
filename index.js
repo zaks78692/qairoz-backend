@@ -6,12 +6,22 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+console.log('🔧 Server Configuration:');
+console.log('📡 Port:', PORT);
+console.log('🌍 Environment:', process.env.NODE_ENV || 'development');
+console.log('🔑 AWS Access Key configured:', !!process.env.AWS_ACCESS_KEY_ID);
+console.log('🔐 AWS Secret Key configured:', !!process.env.AWS_SECRET_ACCESS_KEY);
+console.log('🌎 AWS Region:', process.env.AWS_REGION || 'eu-north-1');
+console.log('🪣 S3 Bucket:', process.env.AWS_S3_BUCKET_NAME || 'qairoz-data-storage');
+
 // Configure AWS S3
+console.log('⚙️ Configuring AWS S3...');
 const s3 = new AWS.S3({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   region: process.env.AWS_REGION || 'eu-north-1'
 });
+console.log('✅ AWS S3 client initialized');
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME || 'qairoz-data-storage';
 
@@ -45,7 +55,9 @@ app.get('/', (req, res) => {
       'GET /api/students',
       'POST /api/students',
       'GET /api/colleges',
-      'GET /api/stats'
+      'GET /api/stats',
+      'GET /api/test-s3',
+      'POST /api/export-to-s3'
     ]
   });
 });
@@ -227,14 +239,7 @@ app.get('/api/test-s3', (req, res) => {
     return res.status(500).json({
       success: false,
       error: 'AWS credentials not configured',
-      message: 'Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables',
-      timestamp: new Date().toISOString(),
-      envCheck: {
-        AWS_ACCESS_KEY_ID: !!process.env.AWS_ACCESS_KEY_ID,
-        AWS_SECRET_ACCESS_KEY: !!process.env.AWS_SECRET_ACCESS_KEY,
-        AWS_REGION: process.env.AWS_REGION || 'not set',
-        AWS_S3_BUCKET_NAME: process.env.AWS_S3_BUCKET_NAME || 'not set'
-      }
+      message: 'Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables'
     });
   }
 
@@ -245,14 +250,7 @@ app.get('/api/test-s3', (req, res) => {
       res.status(500).json({
         success: false,
         error: 'S3 connection failed',
-        message: err.message,
-        timestamp: new Date().toISOString(),
-        envCheck: {
-          AWS_ACCESS_KEY_ID: !!process.env.AWS_ACCESS_KEY_ID,
-          AWS_SECRET_ACCESS_KEY: !!process.env.AWS_SECRET_ACCESS_KEY,
-          AWS_REGION: process.env.AWS_REGION || 'not set',
-          AWS_S3_BUCKET_NAME: process.env.AWS_S3_BUCKET_NAME || 'not set'
-        }
+        message: err.message
       });
     } else {
       console.log('✅ S3 connection successful');
@@ -262,8 +260,7 @@ app.get('/api/test-s3', (req, res) => {
         data: {
           buckets: data.Buckets.map(bucket => bucket.Name),
           region: process.env.AWS_REGION || 'eu-north-1',
-          targetBucket: BUCKET_NAME,
-          timestamp: new Date().toISOString()
+          targetBucket: BUCKET_NAME
         }
       });
     }
@@ -276,7 +273,6 @@ app.post('/api/export-to-s3', (req, res) => {
   
   try {
     const timestamp = new Date().toISOString().split('T')[0];
-    const timeString = new Date().toISOString().replace(/[:.]/g, '-');
     
     // Prepare data for export
     const exportData = {
@@ -285,8 +281,7 @@ app.post('/api/export-to-s3', (req, res) => {
       stats: {
         totalColleges: colleges.length,
         totalStudents: students.length,
-        exportedAt: new Date().toISOString(),
-        exportedBy: 'Qairoz System'
+        exportedAt: new Date().toISOString()
       }
     };
     
@@ -308,23 +303,21 @@ app.post('/api/export-to-s3', (req, res) => {
     const csvContent = csvHeader + csvData;
     
     // Upload JSON file
-    const jsonKey = `qairoz-data-${timestamp}-${timeString}.json`;
+    const jsonKey = `qairoz-data-${timestamp}.json`;
     const jsonParams = {
       Bucket: BUCKET_NAME,
       Key: jsonKey,
       Body: JSON.stringify(exportData, null, 2),
-      ContentType: 'application/json',
-      ServerSideEncryption: 'AES256'
+      ContentType: 'application/json'
     };
     
     // Upload CSV file
-    const csvKey = `qairoz-students-${timestamp}-${timeString}.csv`;
+    const csvKey = `qairoz-students-${timestamp}.csv`;
     const csvParams = {
       Bucket: BUCKET_NAME,
       Key: csvKey,
       Body: csvContent,
-      ContentType: 'text/csv',
-      ServerSideEncryption: 'AES256'
+      ContentType: 'text/csv'
     };
     
     // Upload both files
@@ -348,14 +341,12 @@ app.post('/api/export-to-s3', (req, res) => {
         {
           name: jsonKey,
           size: JSON.stringify(exportData).length,
-          url: results[0].Location,
-          type: 'JSON'
+          url: results[0].Location
         },
         {
           name: csvKey,
           size: csvContent.length,
-          url: results[1].Location,
-          type: 'CSV'
+          url: results[1].Location
         }
       ];
       
@@ -365,7 +356,6 @@ app.post('/api/export-to-s3', (req, res) => {
         data: {
           files,
           bucket: BUCKET_NAME,
-          timestamp: new Date().toISOString(),
           totalColleges: colleges.length,
           totalStudents: students.length
         }
@@ -423,51 +413,20 @@ app.get('/api/backups', (req, res) => {
   });
 });
 
-// Clear all data (for testing)
-app.delete('/api/clear', (req, res) => {
-  try {
-    const oldColleges = colleges.length;
-    const oldStudents = students.length;
-    
-    colleges = [];
-    students = [];
-    
-    console.log(`🗑️ Cleared ${oldColleges} colleges and ${oldStudents} students`);
-    
-    res.json({
-      success: true,
-      message: 'All data cleared successfully',
-      data: {
-        clearedColleges: oldColleges,
-        clearedStudents: oldStudents
-      }
-    });
-  } catch (error) {
-    console.error('❌ Error clearing data:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to clear data'
-    });
-  }
-});
-
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('💥 Unhandled error:', err.stack);
   res.status(500).json({ 
     success: false,
-    error: 'Internal server error',
-    message: 'Something went wrong on the server'
+    error: 'Internal server error'
   });
 });
 
 // 404 handler
 app.use('*', (req, res) => {
-  console.log(`❓ 404 - Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ 
     success: false,
     error: 'Route not found',
-    requestedRoute: `${req.method} ${req.originalUrl}`,
     availableRoutes: [
       'GET /',
       'GET /api/health',
@@ -475,7 +434,9 @@ app.use('*', (req, res) => {
       'POST /api/students',
       'GET /api/colleges',
       'GET /api/stats',
-      'DELETE /api/clear'
+      'GET /api/test-s3',
+      'POST /api/export-to-s3',
+      'GET /api/backups'
     ]
   });
 });
@@ -483,19 +444,10 @@ app.use('*', (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Qairoz Backend Server running on port ${PORT}`);
+  console.log(`🌐 Server URL: http://localhost:${PORT}`);
   console.log(`📡 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`☁️ S3 test: http://localhost:${PORT}/api/test-s3`);
   console.log(`🌐 CORS enabled for:`, allowedOrigins);
   console.log(`💾 In-memory storage initialized`);
-  console.log(`⏰ Server started at: ${new Date().toISOString()}`);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('🛑 SIGTERM received, shutting down gracefully');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('🛑 SIGINT received, shutting down gracefully');
-  process.exit(0);
+  console.log('✅ Server startup complete!');
 });
