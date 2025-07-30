@@ -46,6 +46,7 @@ if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
 } else {
   console.log('⚠️ Gmail SMTP not configured - email features disabled');
 }
+
 // Root route
 app.get('/', (req, res) => {
   res.json({ 
@@ -59,7 +60,7 @@ app.get('/', (req, res) => {
       'GET /api/stats',
       'POST /api/export-to-s3',
       'GET /api/test-s3',
-      'GET /api/backups'
+      'GET /api/backups',
       'POST /api/send-email'
     ]
   });
@@ -342,7 +343,8 @@ app.use('*', (req, res) => {
       'GET /api/students',
       'POST /api/students',
       'GET /api/colleges',
-      'GET /api/stats'
+      'GET /api/stats',
+      'POST /api/send-email'
     ]
   });
 });
