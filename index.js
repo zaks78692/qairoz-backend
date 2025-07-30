@@ -1,9 +1,19 @@
 const express = require('express');
 const cors = require('cors');
+const AWS = require('aws-sdk');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Configure AWS S3
+const s3 = new AWS.S3({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION || 'eu-north-1'
+});
+
+const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME || 'qairoz-data-storage';
 
 // Environment-based configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
@@ -205,6 +215,212 @@ app.get('/api/stats', (req, res) => {
       error: 'Failed to calculate statistics' 
     });
   }
+});
+
+// Test S3 connection
+app.get('/api/test-s3', (req, res) => {
+  console.log('🔍 Testing S3 connection...');
+  
+  // Check if AWS credentials are configured
+  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+    console.error('❌ AWS credentials not configured');
+    return res.status(500).json({
+      success: false,
+      error: 'AWS credentials not configured',
+      message: 'Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables',
+      timestamp: new Date().toISOString(),
+      envCheck: {
+        AWS_ACCESS_KEY_ID: !!process.env.AWS_ACCESS_KEY_ID,
+        AWS_SECRET_ACCESS_KEY: !!process.env.AWS_SECRET_ACCESS_KEY,
+        AWS_REGION: process.env.AWS_REGION || 'not set',
+        AWS_S3_BUCKET_NAME: process.env.AWS_S3_BUCKET_NAME || 'not set'
+      }
+    });
+  }
+
+  // Test S3 connection by listing buckets
+  s3.listBuckets((err, data) => {
+    if (err) {
+      console.error('❌ S3 connection failed:', err.message);
+      res.status(500).json({
+        success: false,
+        error: 'S3 connection failed',
+        message: err.message,
+        timestamp: new Date().toISOString(),
+        envCheck: {
+          AWS_ACCESS_KEY_ID: !!process.env.AWS_ACCESS_KEY_ID,
+          AWS_SECRET_ACCESS_KEY: !!process.env.AWS_SECRET_ACCESS_KEY,
+          AWS_REGION: process.env.AWS_REGION || 'not set',
+          AWS_S3_BUCKET_NAME: process.env.AWS_S3_BUCKET_NAME || 'not set'
+        }
+      });
+    } else {
+      console.log('✅ S3 connection successful');
+      res.json({
+        success: true,
+        message: 'S3 connection test successful',
+        data: {
+          buckets: data.Buckets.map(bucket => bucket.Name),
+          region: process.env.AWS_REGION || 'eu-north-1',
+          targetBucket: BUCKET_NAME,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  });
+});
+
+// Export to S3
+app.post('/api/export-to-s3', (req, res) => {
+  console.log('📤 Starting S3 export...');
+  
+  try {
+    const timestamp = new Date().toISOString().split('T')[0];
+    const timeString = new Date().toISOString().replace(/[:.]/g, '-');
+    
+    // Prepare data for export
+    const exportData = {
+      colleges,
+      students,
+      stats: {
+        totalColleges: colleges.length,
+        totalStudents: students.length,
+        exportedAt: new Date().toISOString(),
+        exportedBy: 'Qairoz System'
+      }
+    };
+    
+    // Convert students to CSV format
+    const csvHeader = 'College Name,College Email,Student Name,Email,Phone,Roll Number,Course,Year,Sport,Registration Date\n';
+    const csvData = students.map(student => [
+      student.collegeName || 'Unknown',
+      student.collegeEmail || 'N/A',
+      student.name,
+      student.email,
+      student.phone,
+      student.rollNumber,
+      student.course,
+      student.year,
+      student.sport,
+      new Date(student.uploadedAt || student.registrationDate || new Date()).toLocaleDateString()
+    ].map(field => `"${field}"`).join(',')).join('\n');
+    
+    const csvContent = csvHeader + csvData;
+    
+    // Upload JSON file
+    const jsonKey = `qairoz-data-${timestamp}-${timeString}.json`;
+    const jsonParams = {
+      Bucket: BUCKET_NAME,
+      Key: jsonKey,
+      Body: JSON.stringify(exportData, null, 2),
+      ContentType: 'application/json',
+      ServerSideEncryption: 'AES256'
+    };
+    
+    // Upload CSV file
+    const csvKey = `qairoz-students-${timestamp}-${timeString}.csv`;
+    const csvParams = {
+      Bucket: BUCKET_NAME,
+      Key: csvKey,
+      Body: csvContent,
+      ContentType: 'text/csv',
+      ServerSideEncryption: 'AES256'
+    };
+    
+    // Upload both files
+    Promise.all([
+      new Promise((resolve, reject) => {
+        s3.upload(jsonParams, (err, data) => {
+          if (err) reject(err);
+          else resolve(data);
+        });
+      }),
+      new Promise((resolve, reject) => {
+        s3.upload(csvParams, (err, data) => {
+          if (err) reject(err);
+          else resolve(data);
+        });
+      })
+    ]).then((results) => {
+      console.log('✅ S3 export successful');
+      
+      const files = [
+        {
+          name: jsonKey,
+          size: JSON.stringify(exportData).length,
+          url: results[0].Location,
+          type: 'JSON'
+        },
+        {
+          name: csvKey,
+          size: csvContent.length,
+          url: results[1].Location,
+          type: 'CSV'
+        }
+      ];
+      
+      res.json({
+        success: true,
+        message: 'Data exported to S3 successfully',
+        data: {
+          files,
+          bucket: BUCKET_NAME,
+          timestamp: new Date().toISOString(),
+          totalColleges: colleges.length,
+          totalStudents: students.length
+        }
+      });
+    }).catch((error) => {
+      console.error('❌ S3 upload failed:', error);
+      res.status(500).json({
+        success: false,
+        error: 'S3 upload failed',
+        message: error.message
+      });
+    });
+    
+  } catch (error) {
+    console.error('❌ S3 export error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Export failed',
+      message: error.message
+    });
+  }
+});
+
+// Get backups from S3
+app.get('/api/backups', (req, res) => {
+  console.log('📋 Fetching S3 backups...');
+  
+  const params = {
+    Bucket: BUCKET_NAME,
+    Prefix: 'qairoz-'
+  };
+  
+  s3.listObjectsV2(params, (err, data) => {
+    if (err) {
+      console.error('❌ Failed to fetch S3 backups:', err);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch backups',
+        message: err.message
+      });
+    } else {
+      const backups = data.Contents.map(object => ({
+        name: object.Key,
+        size: object.Size,
+        lastModified: object.LastModified,
+        url: `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || 'eu-north-1'}.amazonaws.com/${object.Key}`
+      })).sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
+      
+      console.log(`✅ Found ${backups.length} backup files`);
+      res.json({
+        success: true,
+        data: backups
+      });
+    }
+  });
 });
 
 // Clear all data (for testing)
