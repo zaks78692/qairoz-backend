@@ -29,7 +29,7 @@ let students = [];
 let emailTransporter = null;
 
 if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-  emailTransporter = nodemailer.createTransporter({
+  emailTransporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
       user: process.env.GMAIL_USER,
@@ -235,4 +235,6 @@ app.listen(PORT, () => {
   console.log(`🚀 Qairoz Backend Server running on port ${PORT}`);
   console.log(`📡 Health check: http://localhost:${PORT}/api/health`);
   console.log(`🌐 CORS enabled for: ${allowedOrigins.join(', ')}`);
+  console.log(`🔍 Server started successfully on port ${PORT}`);
+  console.log(`📋 Available routes: /, /api/health, /api/students, /api/colleges, /api/stats, /api/send-email`);
 });
