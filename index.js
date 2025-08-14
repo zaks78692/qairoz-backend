@@ -37,7 +37,7 @@ console.log('🔑 GMAIL_APP_PASSWORD:', gmailPassword ? 'SET' : 'NOT SET');
 // Configure email transporter safely
 if (gmailUser && gmailPassword) {
   try {
-    emailTransporter = nodemailer.createTransporter({
+    emailTransporter = nodemailer.createTransport({
       service: 'gmail',
       host: 'smtp.gmail.com',
       port: 587,
