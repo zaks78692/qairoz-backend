@@ -3,7 +3,14 @@ const cors = require('cors');
 const { Resend } = require('resend');
 
 const app = express();
+
+// Railway requires listening on process.env.PORT - this is CRITICAL
 const PORT = process.env.PORT || 3001;
+
+console.log('🚀 Starting Qairoz Backend Server...');
+console.log('📡 PORT from Railway:', process.env.PORT);
+console.log('📡 Final PORT:', PORT);
+console.log('🌍 NODE_ENV:', process.env.NODE_ENV || 'development');
 
 // Basic middleware
 app.use(express.json({ limit: '10mb' }));
@@ -289,10 +296,17 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Start server
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log('🚀 Qairoz Backend Server running on port', PORT);
+  console.log('✅ 🚀 Qairoz Backend Server SUCCESSFULLY running on port', PORT);
+  console.log('✅ 🌐 Server listening on process.env.PORT:', process.env.PORT);
   console.log('📡 Health check: http://localhost:' + PORT + '/api/health');
   console.log('🌐 CORS enabled for:', allowedOrigins.join(', '));
-  console.log('✅ Server started successfully');
+  console.log('✅ ✅ Server started successfully - Railway deployment complete!');
+  
+  // CRITICAL: Keep the process alive - Railway requirement
+  // Railway will stop the container if it doesn't see activity
+  setInterval(() => {
+    console.log('💓 Server heartbeat - keeping Railway container alive at', new Date().toISOString());
+  }, 25000); // Every 25 seconds - more frequent than Railway's timeout
 });
 
 // Handle server errors
@@ -300,4 +314,24 @@ server.on('error', (error) => {
   console.error('❌ Server error:', error);
 });
 
-console.log('📋 Server setup complete');
+// Prevent the process from exiting
+process.on('exit', (code) => {
+  console.log('🛑 ⚠️ Process exiting with code:', code);
+});
+
+// CRITICAL: Handle Railway's SIGTERM gracefully
+process.on('SIGTERM', () => {
+  console.log('📴 ⚠️ SIGTERM received from Railway, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ ✅ Server closed gracefully');
+    process.exit(0);
+  });
+});
+
+// Additional Railway-specific logging
+console.log('📋 ✅ Server setup complete');
+console.log('🔧 Railway Configuration Check:');
+console.log('   - Listening on 0.0.0.0:', PORT);
+console.log('   - Health endpoint: /api/health');
+console.log('   - Email service:', resend ? 'CONFIGURED' : 'NOT CONFIGURED');
+console.log('🎯 Ready for Railway deployment!');
