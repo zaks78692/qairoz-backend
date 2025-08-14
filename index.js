@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -25,52 +25,23 @@ app.use(cors({
 let colleges = [];
 let students = [];
 
-// Email configuration
-let emailTransporter = null;
-const gmailUser = process.env.GMAIL_USER;
-const gmailPassword = process.env.GMAIL_APP_PASSWORD;
+// Email configuration with Resend
+let resend = null;
+const resendApiKey = process.env.RESEND_API_KEY;
 
 console.log('🔍 Email Configuration Check:');
-console.log('📧 GMAIL_USER:', gmailUser ? `SET (${gmailUser})` : 'NOT SET');
-console.log('🔑 GMAIL_APP_PASSWORD:', gmailPassword ? 'SET' : 'NOT SET');
+console.log('📧 RESEND_API_KEY:', resendApiKey ? 'SET' : 'NOT SET');
 
-// Configure email transporter safely
-if (gmailUser && gmailPassword) {
+if (resendApiKey) {
   try {
-    emailTransporter = nodemailer.createTransport({
-      service: 'gmail',
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: gmailUser,
-        pass: gmailPassword
-      },
-      pool: true,
-      maxConnections: 5,
-      maxMessages: 100,
-      rateLimit: 14
-    });
-    
-    console.log('📧 Gmail SMTP configured for:', gmailUser);
-    
-    // Test connection asynchronously without blocking startup
-    setTimeout(() => {
-      emailTransporter.verify((error, success) => {
-        if (error) {
-          console.log('⚠️ SMTP verification failed:', error.message);
-        } else {
-          console.log('✅ SMTP connection verified successfully');
-        }
-      });
-    }, 2000);
-    
+    resend = new Resend(resendApiKey);
+    console.log('✅ Resend email service configured successfully');
   } catch (error) {
-    console.log('⚠️ Email transporter setup failed:', error.message);
-    emailTransporter = null;
+    console.log('❌ Resend setup failed:', error.message);
+    resend = null;
   }
 } else {
-  console.log('⚠️ Email not configured - missing environment variables');
+  console.log('⚠️ Resend not configured - missing RESEND_API_KEY');
 }
 
 // Routes
@@ -89,7 +60,7 @@ app.get('/api/health', (req, res) => {
     message: 'Server is running',
     timestamp: new Date().toISOString(),
     port: PORT,
-    emailConfigured: !!emailTransporter
+    emailConfigured: !!resend
   });
 });
 
@@ -219,57 +190,55 @@ app.post('/api/send-email', async (req, res) => {
       });
     }
     
-    if (!emailTransporter) {
-      console.log('❌ Email transporter not available');
+    if (!resend) {
+      console.log('❌ Resend not configured');
       return res.json({
         success: false,
         error: 'Email service not configured',
-        code: 'NO_TRANSPORTER'
+        code: 'NO_EMAIL_SERVICE'
       });
     }
     
-    const mailOptions = {
-      from: `"Qairoz Platform" <${gmailUser}>`,
+    console.log('📤 Sending email via Resend...');
+    
+    const emailData = {
+      from: 'Qairoz Platform <noreply@qairoz.org>',
       to: to,
       subject: subject,
       html: html
     };
     
-    console.log('📤 Sending email...');
+    const result = await resend.emails.send(emailData);
     
-    const info = await emailTransporter.sendMail(mailOptions);
-    
-    console.log('✅ Email sent successfully:', {
+    console.log('✅ Email sent successfully via Resend:', {
       to: to,
-      messageId: info.messageId,
-      response: info.response
+      id: result.data?.id,
+      status: 'sent'
     });
     
     res.json({
       success: true,
       message: 'Email sent successfully',
       data: {
-        messageId: info.messageId,
+        id: result.data?.id,
         to: to,
-        subject: subject
+        subject: subject,
+        service: 'resend'
       }
     });
     
   } catch (error) {
-    console.error('❌ Email sending failed:', error.message);
+    console.error('❌ Resend email sending failed:', error.message);
     
     let errorMessage = 'Failed to send email';
     let errorCode = 'UNKNOWN';
     
-    if (error.code === 'EAUTH') {
-      errorMessage = 'Gmail authentication failed';
-      errorCode = 'AUTH_FAILED';
-    } else if (error.code === 'ECONNECTION') {
-      errorMessage = 'Cannot connect to Gmail SMTP';
-      errorCode = 'CONNECTION_FAILED';
-    } else if (error.code === 'ETIMEDOUT') {
-      errorMessage = 'Email sending timed out';
-      errorCode = 'TIMEOUT';
+    if (error.message.includes('API key')) {
+      errorMessage = 'Invalid Resend API key';
+      errorCode = 'INVALID_API_KEY';
+    } else if (error.message.includes('rate limit')) {
+      errorMessage = 'Email rate limit exceeded';
+      errorCode = 'RATE_LIMIT';
     }
     
     res.status(500).json({
@@ -312,12 +281,10 @@ process.on('SIGINT', () => {
 
 process.on('uncaughtException', (error) => {
   console.error('❌ Uncaught Exception:', error);
-  // Don't exit, just log
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Unhandled Rejection:', reason);
-  // Don't exit, just log
 });
 
 // Start server
