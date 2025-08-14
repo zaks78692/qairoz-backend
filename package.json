@@ -11,7 +11,8 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "echo 'No tests specified'",
-    "build": "echo 'No build step required'"
+    "build": "echo 'No build step required'",
+    "postinstall": "echo 'Dependencies installed successfully'"
   },
   "dependencies": {
     "cors": "^2.8.5",
